@@ -56,9 +56,10 @@ impl PagedFile {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn read_page(&mut self, page_number: u64, buf: &mut [u8]) -> io::Result<usize> {
+    pub fn read_page(&mut self, page_number: u64, buf: &mut [u8]) -> io::Result<()> {
         (&self.file).seek(SeekFrom::Start(page_number * self.page_size as u64))?;
-        (&self.file).read(&mut buf[..self.page_size])
+        (&self.file).read_exact(&mut buf[..self.page_size])?;
+        Ok(())
     }
 
     /// Writes one page from the provided buffer to the specified page of the PagedFile,
@@ -67,12 +68,16 @@ impl PagedFile {
     /// Direct I/O requires that the provided buffer is properly aligned.
     pub fn write_page(&mut self, page_number: u64, buf: &[u8]) -> io::Result<()> {
         (&self.file).seek(SeekFrom::Start(page_number * self.page_size as u64))?;
-        (&self.file).write_all(&buf[..self.page_size])
+        (&self.file).write_all(&buf[..self.page_size])?;
+        (&self.file).sync_data()?;
+        Ok(())
     }
-    pub fn append(&mut self, buf: &[u8]) -> io::Result<u64> {
+
+    pub fn append_page(&mut self, buf: &[u8]) -> io::Result<u64> {
         let offset = (&self.file).seek(SeekFrom::End(0))?;
         let pageno = offset / self.page_size() as u64;
         (&self.file).write_all(&buf[..self.page_size()])?;
+        (&self.file).sync_data()?;
         Ok(pageno)
     }
 
@@ -95,6 +100,10 @@ impl<'a> AlignedRef<'a> {
     fn new(slice: &'a [u8]) -> AlignedRef<'a> {
         AlignedRef { slice }
     }
+
+    pub fn as_slice(&self) -> &'a [u8] {
+        self.slice
+    }
 }
 
 impl<'a> Deref for AlignedRef<'a> {
@@ -112,6 +121,10 @@ pub struct AlignedMut<'a> {
 impl<'a> AlignedMut<'a> {
     fn new(slice: &'a mut [u8]) -> AlignedMut<'a> {
         AlignedMut { slice }
+    }
+
+    pub fn into_slice(self) -> &'a mut [u8] {
+        self.slice
     }
 }
 
@@ -164,36 +177,12 @@ pub fn aligned_mut(slice: &mut [u8], align: usize) -> &mut [u8] {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::path::PathBuf;
+    use crate::testutils::create_test_path;
 
-    #[cfg(test)]
-    fn create_test_path<P: AsRef<Path>>(p: P) -> PathBuf {
-        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("data");
-        path.push("test");
-        path.push(p);
-        path
-    }
-
-    struct TempPath<'a> {
-        path: &'a Path,
-    }
-
-    impl<'a> TempPath<'a> {
-        fn new(path: &'a Path) -> TempPath<'a> {
-            TempPath { path }
-        }
-    }
-    impl<'a> Drop for TempPath<'a> {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(self.path);
-        }
-    }
 
     #[test]
     fn write_then_read() -> anyhow::Result<()> {
         let filepath = create_test_path("test-potpotdb::storage::write_then_read.data");
-        let _t = TempPath::new(&filepath);
         let mut f = PagedFile::from_path(&filepath, PAGE_SIZE)?;
 
         let mut read_buf = [0; PAGE_SIZE * 2];
@@ -203,7 +192,7 @@ mod test {
 
             let write_page = [*i; PAGE_SIZE * 2];
             let write_aligned = f.aligned_ref(&write_page);
-            let pageno = f.append(&write_aligned)?;
+            let pageno = f.append_page(&write_aligned)?;
 
             f.read_page(pageno, &mut read_aligned)?;
 
