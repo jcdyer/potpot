@@ -1,5 +1,8 @@
 pub mod buffer;
 pub mod storage;
+pub mod aligned;
 
 #[cfg(test)]
-pub mod testutils;
+mod testutils;
+
+pub const PAGESIZE: usize = 4096;

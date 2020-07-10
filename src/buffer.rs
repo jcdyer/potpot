@@ -1,7 +1,14 @@
-/// Buffer pool to cache
-/// Cache system.  Does this need to
-use crate::storage::PagedFile;
-use std::{collections::HashMap, sync::Mutex};
+//! Buffer pool to cache pages from the page file in memory.
+
+// TODO:
+// 1.  Write pages to the buffer pool before persisting to the PagedFile
+// 2.  Implement delayed persistence.  Writes update buffer pool, and mark
+//     entries as dirty.  When a dirty page is marked for eviction, it needs
+//     to be persisted before it is written (and any adjacent dirty pages
+//     can be written in the same operation).
+
+use crate::{aligned, storage::PagedFile};
+use std::collections::HashMap;
 
 pub trait CacheManager<T> {
     // Mark the entry at the given slot as updated
@@ -67,85 +74,107 @@ pub struct BufferPool<CM = ClockManager<u64>>
 where
     CM: CacheManager<u64>,
 {
-    // map page IDs to their location in the cache
-    catalog: HashMap<u64, usize>,
+    // map page IDs to their location in the buffer pool
+    page_table: HashMap<u64, usize>,
 
-    // manager to determine which cache entries to evict
+    // manager to determine which frames to evict
     manager: CM,
 
     // cached pages
-    cache: Vec<Mutex<[u8; 4096]>>,
+    frames: Vec<[u8; 4096]>,
 
     // the managed PagedFile
-    page_file: PagedFile,
+    storage: PagedFile,
 }
 
 impl BufferPool {
-    pub fn new(page_file: PagedFile, size: usize) -> BufferPool {
-        let cache = std::iter::repeat_with(|| Mutex::new([0; 4096]))
-            .take(size)
-            .collect();
+    pub fn new(storage: PagedFile, size: usize) -> BufferPool {
+        let frames = std::iter::repeat([0; 4096]).take(size).collect();
         BufferPool {
-            catalog: HashMap::with_capacity(size),
-            cache,
+            page_table: HashMap::with_capacity(size),
             manager: ClockManager::new(size),
-            page_file,
+            frames,
+            storage,
         }
     }
 
-    pub fn read_page(&mut self, page_id: u64, buf: &mut [u8]) -> std::io::Result<()> {
-        let BufferPool {
-            catalog,
-            cache,
+    pub fn read_page(&mut self, page_id: u64, buf: &mut aligned::Buffer) -> std::io::Result<()> {
+        /*let BufferPool {
+            page_table,
             manager,
-            page_file,
+            frames,
+            storage,
         } = self;
+        */
 
-        let entry = catalog
+        let entry = self
+            .page_table
             .get(&page_id)
-            .and_then(|cache_idx| {
-                manager.update(*cache_idx);
-                cache.get(*cache_idx)
-            })
-            .map(|mtx| mtx.lock().unwrap());
+            .copied() // Release the borrow of self
+            .and_then(|frame_idx| {
+                self.manager.update(frame_idx);
+                self.frames.get_mut(frame_idx)
+            });
 
-        match entry {
-            Some(val) => {
-                println!("Got some entry");
-                buf.copy_from_slice(val.as_ref());
-            }
-            None => {
-                println!("No entry");
-                page_file.read_page(page_id, buf)?;
+        if let Some(val) = entry {
+            println!("Got some entry");
+            buf.copy_from_slice(val.as_ref());
+        } else {
+            println!("No entry");
+            self.storage.read_page(page_id, buf)?;
 
-                let (cache_idx, evicted_page) = manager.sweep(page_id);
+            let frame_idx = self.add_to_buffer_pool(page_id, buf);
 
-                // If there is a page to evict, remove it now.
-                evicted_page.and_then(|page_id| catalog.remove(&page_id));
-
-                // Copy the page into the selected cache index
-                catalog.insert(page_id, cache_idx);
-                cache[cache_idx].lock().unwrap()[..].copy_from_slice(&buf);
-            }
-        };
+            self.frames[frame_idx][..].copy_from_slice(&buf);
+        }
         Ok(())
     }
 
     // Write a page and get back a page id.
-    pub fn append_page(&mut self, data: &[u8]) -> std::io::Result<u64> {
-        self.page_file.append_page(data)
+    pub fn append_page(&mut self, aligned_data: &[u8]) -> std::io::Result<u64> {
+        // TBD: Figure out how to manage page_ids of new pages written to the buffer pool
+        // without persisting to disk first. Decouple page_ids from disk order?  Track
+        // unwritten page_ids?
+        let page_id = self.storage.append_page(aligned_data)?;
+        self.add_to_buffer_pool(page_id, aligned_data);
+        Ok(page_id)
     }
 
     // Update an existing page
     pub fn update_page(&mut self, page_id: u64, data: &[u8]) -> std::io::Result<()> {
-        self.page_file.write_page(page_id, data)
+        self.add_to_buffer_pool(page_id, data);
+        self.storage.write_page(page_id, data)
+    }
+
+    fn add_to_buffer_pool(&mut self, page_id: u64, data: &[u8]) -> usize {
+        let frame_idx = self.page_table.get(&page_id);
+        let frame_idx = match frame_idx {
+            Some(&frame_idx) => {
+                self.manager.update(frame_idx);
+                frame_idx
+            }
+            None => {
+                let (idx, evicted_page) = self.manager.sweep(page_id);
+
+                // If there is a page to evict, remove it now.
+                if let Some(page_id) = evicted_page {
+                    self.page_table.remove(&page_id);
+                }
+                self.page_table.insert(page_id, idx);
+                idx
+            }
+        };
+
+        // Review: Is this sometimes not necessary?
+        self.frames[frame_idx].copy_from_slice(data);
+        frame_idx
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{storage::PagedFile, testutils::create_test_path};
+    use crate::{aligned, storage::PagedFile, testutils::create_test_path};
     use std::fmt;
 
     struct CMDebug<'a, T>(&'a ClockManager<T>);
@@ -164,7 +193,7 @@ mod tests {
     fn clock_manager() {
         let mut cm = ClockManager::new(4);
 
-        // Fill the cache
+        // Fill the buffer pool
         for (i, val) in (100..104).enumerate() {
             let (idx, replaced) = dbg!(cm.sweep(val));
             assert_eq!(idx, i);
@@ -191,22 +220,23 @@ mod tests {
     }
 
     #[test]
-    fn append_pages() -> anyhow::Result<()> {
+    fn append_and_update_pages() -> anyhow::Result<()> {
         let path = create_test_path("test-potpotdb::buffer::append_pages.data");
-        let page_file = PagedFile::from_path(&path, 4096)?;
-        let mut pool = BufferPool::new(page_file, 3);
+        let storage = PagedFile::from_path(&path)?;
+        let mut pool = BufferPool::new(storage, 3);
 
-        let buf = [255; 8192];
-        let aligned = pool.page_file.aligned_ref(&buf);
+        let aligned = aligned::Buffer::with_value(0xff);
 
         for expected_page in [0, 1, 2, 3, 4].iter() {
             let page_id = pool.append_page(&aligned)?;
             dbg!(page_id);
             assert_eq!(page_id, *expected_page);
+
+            // Verify that the page is written into the buffer pool
+            //assert!(pool.page_table.contains_key(&page_id));
         }
 
-        let mut read_buf = [0; 8192];
-        let mut read_aligned = pool.page_file.aligned_mut(&mut read_buf);
+        let mut read_aligned = aligned::Buffer::new();
 
         for page_id in [0, 1, 2, 3, 4].iter() {
             // Assert that reading a page fills the buffer with the appropriate data
@@ -221,16 +251,35 @@ mod tests {
         pool.read_page(5, &mut read_aligned)
             .expect_err("reading a nonexistent page should error");
 
+        // Try updating a page that is in the buffer pool, and a page that is not in the buffer pool:
+        // Verify that the data can be read from the page, and that the page is still in the buffer pool.
+
+        let aligned = aligned::Buffer::with_value(0x80);
+
+        let in_pool = 4;
+        assert!(pool.page_table.contains_key(&in_pool));
+
+        let not_in_pool = 0;
+        assert!(!pool.page_table.contains_key(&not_in_pool));
+
+        // Test in_pool first, because testing not_in_pool could evict in_pool
+        for &page_id in &[in_pool, not_in_pool] {
+            pool.update_page(page_id, &aligned)?;
+            assert!(pool.page_table.contains_key(&page_id));
+
+            pool.read_page(page_id, &mut read_aligned)?;
+            read_aligned.iter().for_each(|byte| assert_eq!(*byte, 128));
+        }
+
         Ok(())
     }
 
     #[test]
-    fn buffer_cache() -> anyhow::Result<()> {
-        let path = create_test_path("test-potpotdb::buffer::buffer_cache.data");
-        let page_file = PagedFile::from_path(&path, 4096)?;
-        let mut pool = BufferPool::new(page_file, 3);
-        let mut buf = [0; 8192];
-        let mut aligned = pool.page_file.aligned_mut(&mut buf);
+    fn buffer_pool() -> anyhow::Result<()> {
+        let path = create_test_path("test-potpotdb::buffer::buffer_pool.data");
+        let storage = PagedFile::from_path(&path)?;
+        let mut pool = BufferPool::new(storage, 3);
+        let mut aligned = aligned::Buffer::new();
 
         let pages: Vec<_> = [101, 102, 103, 104]
             .iter()
