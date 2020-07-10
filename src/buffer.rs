@@ -131,7 +131,7 @@ impl BufferPool {
     }
 
     // Write a page and get back a page id.
-    pub fn append_page(&mut self, aligned_data: &[u8]) -> std::io::Result<u64> {
+    pub fn append_page(&mut self, aligned_data: &aligned::Buffer) -> std::io::Result<u64> {
         // TBD: Figure out how to manage page_ids of new pages written to the buffer pool
         // without persisting to disk first. Decouple page_ids from disk order?  Track
         // unwritten page_ids?
@@ -141,7 +141,7 @@ impl BufferPool {
     }
 
     // Update an existing page
-    pub fn update_page(&mut self, page_id: u64, data: &[u8]) -> std::io::Result<()> {
+    pub fn update_page(&mut self, page_id: u64, data: &aligned::Buffer) -> std::io::Result<()> {
         self.add_to_buffer_pool(page_id, data);
         self.storage.write_page(page_id, data)
     }

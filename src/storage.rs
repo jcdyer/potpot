@@ -45,16 +45,16 @@ impl PagedFile {
     /// path.push("data");
     /// path.push("pagefile");
     /// let mut p = PagedFile::from_path(&path)?;
-    /// let aligned = aligned::Buffer::new();
-    /// p.read_page(0, aligned)?;
-    /// // Data is now read into `aligned[0..4096]`, which is somewhere in `buf`
+    /// let mut aligned = aligned::Buffer::new();
+    /// p.read_page(0, &mut aligned)?;
+    /// // Data is now read into aligned, which can be derefed to a &[u8]
     /// assert_eq!(aligned.len(), p.page_size());
     /// assert_eq!(aligned[0], b'1');
     /// assert_eq!(aligned[1], b'a');
     /// # Ok(())
     /// # }
     /// ```
-    pub(crate) fn read_page(
+    pub fn read_page(
         &mut self,
         page_number: u64,
         buf: &mut aligned::Buffer,
