@@ -36,7 +36,7 @@ impl PagedFile {
     ///
     /// ```
     /// # fn main() -> anyhow::Result<()> {
-    /// use potpotdb::{
+    /// use potpot::{
     ///     aligned,
     ///     storage::PagedFile,
     /// };
@@ -106,7 +106,7 @@ mod test {
 
     #[test]
     fn write_then_read() -> anyhow::Result<()> {
-        let filepath = create_test_path("test-potpotdb::storage::write_then_read.data");
+        let filepath = create_test_path("test-potpot::storage::write_then_read.data");
         let mut f = PagedFile::from_path(&filepath)?;
 
         let mut read_aligned = aligned::Buffer::new();

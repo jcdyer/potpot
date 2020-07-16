@@ -8,7 +8,9 @@
 //     can be written in the same operation).
 
 use crate::{aligned, storage::PagedFile};
-use std::collections::HashMap;
+use std::collections::{
+    HashMap,
+};
 
 pub trait CacheManager<T> {
     // Mark the entry at the given slot as updated
@@ -99,13 +101,6 @@ impl BufferPool {
     }
 
     pub fn read_page(&mut self, page_id: u64, buf: &mut aligned::Buffer) -> std::io::Result<()> {
-        /*let BufferPool {
-            page_table,
-            manager,
-            frames,
-            storage,
-        } = self;
-        */
 
         let entry = self
             .page_table

@@ -77,6 +77,14 @@ impl SlottedPage {
             .map(|(offset, size)| &self.data[offset..offset + size])
     }
 
+    pub(crate) fn data(&self) -> &aligned::Buffer {
+        &self.data
+    }
+
+    pub(crate) fn data_mut(&mut self) -> &mut aligned::Buffer {
+        &mut self.data
+    }
+
     pub fn free_space(&self) -> usize {
         self.available_bytes() as usize
     }
