@@ -8,5 +8,10 @@ edition = "2018"
 
 [dependencies]
 libc = "0.2"
-anyhow = "1.0"
-thiserror = "1.0"
+anyhow = "1"
+crc = "*"
+thiserror = "1"
+rand = "0.7"
+serde = "1"
+twox-hash = "1.5.0"
+bitvec = "0.17"

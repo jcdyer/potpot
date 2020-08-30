@@ -27,7 +27,7 @@ impl From<TryFromIntError> for TmpError {
 /// +--------+------------+---------+
 ///
 pub(crate) struct SlottedPage {
-    data: aligned::Buffer,
+    data: Box<aligned::Buffer>,
 }
 
 impl Default for SlottedPage {

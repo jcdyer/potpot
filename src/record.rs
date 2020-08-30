@@ -2,7 +2,7 @@
 
 use crate::{bufferpool, result, page};
 use std::collections::BTreeMap;
-type PageId = u64;
+pub(crate) type PageId = u64;
 
 /// Creating and accessing record
 pub struct RecordManager {
