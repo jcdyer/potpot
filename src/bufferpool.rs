@@ -7,7 +7,7 @@
 //     to be persisted before it is written (and any adjacent dirty pages
 //     can be written in the same operation).
 
-use crate::{aligned, storage::PagedFile};
+use crate::{PAGESIZE, aligned, storage::PagedFile};
 use std::collections::{
     HashMap,
 };
@@ -83,7 +83,7 @@ where
     manager: CM,
 
     // cached pages
-    frames: Vec<[u8; 4096]>,
+    frames: Vec<[u8; PAGESIZE]>,
 
     // the managed PagedFile
     storage: PagedFile,
@@ -91,7 +91,7 @@ where
 
 impl BufferPool {
     pub fn new(storage: PagedFile, size: usize) -> BufferPool {
-        let frames = std::iter::repeat([0; 4096]).take(size).collect();
+        let frames = std::iter::repeat([0; PAGESIZE]).take(size).collect();
         BufferPool {
             page_table: HashMap::with_capacity(size),
             manager: ClockManager::new(size),
