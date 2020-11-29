@@ -278,7 +278,8 @@ mod page {
         }
 
         fn set_page_type(&mut self) {
-            self.buffer[4..8].copy_from_slice(&(self.page_type() as u32).to_le_bytes());
+            let page_type = &(self.page_type() as u32).to_le_bytes();
+            self.buffer[4..8].copy_from_slice(page_type);
         }
 
         fn set_crc(&mut self) {
@@ -302,7 +303,7 @@ mod page {
 
     impl<V> Page<V> {
         pub(super) fn new(hash_seed: u64) -> Page<V> {
-            let mut buffer = Box::new(aligned::Buffer::new());
+            let buffer = aligned::Buffer::new();
             let mut p = Page {
                 buffer,
                 _value_type: PhantomData,
@@ -314,7 +315,7 @@ mod page {
             p
         }
 
-        pub(super) fn into_aligned(self) -> aligned::Buffer {
+        pub(super) fn into_aligned(self) -> Box<aligned::Buffer> {
             debug_assert_eq!(size_of::<Self>(), PAGESIZE);
             debug_assert_eq!(
                 std::mem::align_of::<Self>(),
@@ -322,7 +323,7 @@ mod page {
             );
 
             // Safety: HeaderPage's size and alignment is the same as PAGESIZE
-            let mut buffer: aligned::Buffer = unsafe { std::mem::transmute(self) };
+            let mut buffer: Box<aligned::Buffer> = unsafe { std::mem::transmute(self) };
 
             // Calculate and write the checksum for this page
             let checksum = crc32::checksum_ieee(&buffer[4..]);
@@ -334,7 +335,7 @@ mod page {
             read_u64(&self.buffer[0x10..0x18])
         }
 
-        pub(super) fn set_hash_seed(&self, hash_seed: u64) {
+        pub(super) fn set_hash_seed(&mut self, hash_seed: u64) {
             self.buffer[0x10..0x18].copy_from_slice(&hash_seed.to_le_bytes())
         }
 

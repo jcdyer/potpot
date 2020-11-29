@@ -12,6 +12,7 @@ pub mod hashtable;
 mod testutils;
 
 pub(crate) const PAGESIZE: usize = 16384;
+
 pub(crate) type Result<T> = std::result::Result<T, result::Error>;
 
 #[repr(u16)]

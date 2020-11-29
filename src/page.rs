@@ -145,15 +145,17 @@ impl SlottedPage {
 
 #[cfg(test)]
 mod tests {
+    use crate::PAGESIZE;
+
     use super::*;
 
     #[test]
     fn empty_slotted_page() {
         let pg = SlottedPage::default();
-        assert_eq!(pg.end_of_free_space(), 4096);
+        assert_eq!(pg.end_of_free_space(), PAGESIZE as u16);
         assert_eq!(pg.record_count(), 0);
         assert_eq!(pg.record_header(0), None);
-        assert_eq!(pg.free_space(), 4092);
+        assert_eq!(pg.free_space(), PAGESIZE - 4);
     }
 
     #[test]
@@ -161,13 +163,13 @@ mod tests {
         let mut pg = SlottedPage::default();
         pg.insert_record(b"new record").expect("insert new record");
         pg.insert_record(b"second record").expect("insert second record");
-        assert_eq!(pg.end_of_free_space(), 4073); // 4096 - 10 - 13
+        assert_eq!(pg.end_of_free_space(), (PAGESIZE as u16 - 10 - 13)); // 4096 - 10 - 13
         assert_eq!(pg.record_count(), 2);
-        assert_eq!(pg.free_space(), 4073 - 12);
+        assert_eq!(pg.free_space(), PAGESIZE - 10 - 13 - 12);
 
-        assert_eq!(pg.record_header(0), Some((4086, 10)));
+        assert_eq!(pg.record_header(0), Some((PAGESIZE as u16 - 10, 10)));
         assert_eq!(pg.get_record(0), Some(b"new record".as_ref()));
-        assert_eq!(pg.record_header(1), Some((4073, 13)));
+        assert_eq!(pg.record_header(1), Some((PAGESIZE as u16 - 10 - 13, 13)));
         assert_eq!(pg.get_record(1), Some(b"second record".as_ref()));
         assert_eq!(pg.record_header(2), None);
         assert_eq!(pg.get_record(2), None);
@@ -176,34 +178,37 @@ mod tests {
     #[test]
     fn fill_slotted_page() {
         let mut pg = SlottedPage::default();
-        assert_eq!(pg.insert_record(&[1; 1024]).expect("insert 1024 bytes"), 0);
-        assert_eq!(pg.insert_record(&[2; 1024]).expect("insert 2048 bytes"), 1);
-        assert_eq!(pg.insert_record(&[3; 1024]).expect("insert 3072 bytes"), 2);
-        pg.insert_record(&[4; 1024]).expect_err("overflow at 4096 bytes");
-        assert_eq!(pg.free_space(), 1008);
-        assert_eq!(pg.insert_record(&[5; 1004]).expect("insert 4076 bytes"), 3);
+        let mut i = 0;
+        while i < PAGESIZE / 1028 {
+            assert_eq!(pg.insert_record(&[i as u8 + 1; 1024]).unwrap_or_else(|_| panic!("insert {} bytes", i * 1024)), i as u16);
+            i += 1;
+        }
+        pg.insert_record(&[0xee; 1024]).expect_err(&format!("overflow at {} bytes", PAGESIZE));
+        assert_eq!(pg.free_space(), 1024 - (i + 1) * 4);
+        let available = pg.free_space() - 4;
+        assert_eq!(pg.insert_record(&vec![0xff; available]).unwrap_or_else(|_| panic!("insert {} bytes", 1024 * i + available)), i as u16);
         assert_eq!(pg.free_space(), 0); // Full page at 4076 bytes written in four records
 
-        assert_eq!(pg.record_header(0).unwrap(), (4096 - 1024, 1024));
+        assert_eq!(pg.record_header(0).unwrap(), (PAGESIZE as u16 - 1024, 1024));
         assert_eq!(pg.get_record(0).expect("record 0 not found"), &[1;1024][..], "record 0 not as expected");
-        assert_eq!(pg.record_header(1).unwrap(), (4096 - 2048, 1024));
+        assert_eq!(pg.record_header(1).unwrap(), (PAGESIZE as u16 - 2048, 1024));
         assert_eq!(pg.get_record(1).expect("record 1 not found"), &[2;1024][..], "record 1 not as expected");
-        assert_eq!(pg.record_header(2).unwrap(), (1024, 1024));
-        assert_eq!(pg.get_record(2).expect("record 2 not found"), &[3;1024][..], "record 2 not as expected");
-        assert_eq!(pg.record_header(3).unwrap(), (20, 1004));
-        assert_eq!(pg.get_record(3).expect("record 3 not found"), &[5;1004][..], "record 3 not as expected");
+        assert_eq!(pg.record_header(14).unwrap(), (1024, 1024));
+        assert_eq!(pg.get_record(14).expect("record 2 not found"), &[15;1024][..], "record 2 not as expected");
+        assert_eq!(pg.record_header(15).unwrap(), (8 + i as u16 * 4, available as u16));
+        assert_eq!(pg.get_record(15).expect("record 3 not found"), &vec![0xff;available][..], "record 3 not as expected");
     }
 
     #[test]
     fn empty_records() {
         let mut pg = SlottedPage::default();
-        assert_eq!(pg.free_space(), 4092);
+        assert_eq!(pg.free_space(), PAGESIZE - 4);
         pg.insert_record(&[]).expect("insert empty record");
-        assert_eq!(pg.free_space(), 4088);
+        assert_eq!(pg.free_space(), PAGESIZE - 8);
         pg.insert_record(&[4,5,6,9]).expect("insert record");
-        assert_eq!(pg.free_space(), 4080);
+        assert_eq!(pg.free_space(), PAGESIZE - 16);
         pg.insert_record(&[]).expect("insert empty record");
-        assert_eq!(pg.free_space(), 4076);
+        assert_eq!(pg.free_space(), PAGESIZE - 20);
 
         assert_eq!(pg.get_record(0), Some([].as_ref()));
         assert_eq!(pg.get_record(1), Some([4u8, 5, 6, 9].as_ref()));

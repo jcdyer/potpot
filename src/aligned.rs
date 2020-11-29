@@ -49,6 +49,15 @@ impl DerefMut for Buffer {
     }
 }
 
+impl<'a> IntoIterator for &'a Buffer {
+    type IntoIter = std::slice::Iter<'a, u8>;
+    type Item = &'a u8;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.iter()
+    }
+}
+
 fn check_crc(buffer: &Buffer) -> bool {
     let crc: u32 = crc32::checksum_ieee(&buffer[4..]);
     crc == u32::from_le_bytes(buffer[..4].try_into().unwrap())
