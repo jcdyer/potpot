@@ -120,7 +120,7 @@ impl BufferPool {
 
             let frame_idx = self.add_to_buffer_pool(page_id, buf);
 
-            self.frames[frame_idx][..].copy_from_slice(&buf);
+            self.frames[frame_idx][..].copy_from_slice(buf);
         }
         Ok(())
     }

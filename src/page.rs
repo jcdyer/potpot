@@ -43,7 +43,7 @@ impl SlottedPage {
     pub(crate) fn new(records: &[&[u8]]) -> Result<SlottedPage, TmpError> {
         let mut pg = SlottedPage::default();
         let total_size: usize = records.iter().map(|rec| rec.len() + 4).sum();
-        if total_size > pg.free_space() as usize {
+        if total_size > pg.free_space() {
             Err(TmpError)
         } else {
             for record in records {

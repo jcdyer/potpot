@@ -71,7 +71,7 @@ impl PagedFile {
     pub fn write_page(&mut self, page_number: u64, buf: &[u8]) -> io::Result<()> {
         (&self.file).seek(SeekFrom::Start(page_number * self.page_size() as u64))?;
         (&self.file).write_all(&buf[..self.page_size()])?;
-        (&self.file).sync_data()?;
+        self.file.sync_data()?;
         Ok(())
     }
 
@@ -79,7 +79,7 @@ impl PagedFile {
         let offset = (&self.file).seek(SeekFrom::End(0))?;
         let pageno = offset / self.page_size() as u64;
         (&self.file).write_all(&buf[..self.page_size()])?;
-        (&self.file).sync_data()?;
+        self.file.sync_data()?;
         Ok(pageno)
     }
 }

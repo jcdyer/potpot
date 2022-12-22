@@ -1,9 +1,11 @@
-use crc::crc32;
+// use crc::crc32;
 use std::{
     convert::TryInto,
     fmt,
     ops::{Deref, DerefMut},
 };
+
+use crate::CRC32;
 
 #[repr(C, align(4096))]
 #[derive(Clone)]
@@ -13,7 +15,7 @@ pub struct Buffer {
 
 impl Buffer {
     pub fn new() -> Box<Buffer> {
-        Box::new(Buffer::default())
+        Box::default()
     }
 
     pub fn with_value(val: u8) -> Buffer {
@@ -59,7 +61,7 @@ impl<'a> IntoIterator for &'a Buffer {
 }
 
 fn check_crc(buffer: &Buffer) -> bool {
-    let crc: u32 = crc32::checksum_ieee(&buffer[4..]);
+    let crc: u32 = CRC32.checksum(&buffer[4..]);
     crc == u32::from_le_bytes(buffer[..4].try_into().unwrap())
 }
 
@@ -96,8 +98,6 @@ pub(crate) trait FromAligned: Sized {
             .or(Err(Error::PageType))?;
         if !check_crc(&buffer) {
             Err(Error::CrcError)
-        } else if std::mem::size_of::<Self>() != std::mem::size_of::<Buffer>() {
-            Err(Error::SizeError)
         } else if page_type != Self::expected_page_type() {
             Err(Error::PageType)
         } else {

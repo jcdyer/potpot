@@ -74,7 +74,7 @@ enum Tag {
 impl TryFrom<u8> for Tag {
     type Error = anyhow::Error;
     fn try_from(val: u8) -> Result<Tag, anyhow::Error> {
-        anyhow::ensure!(val >= 1 && val <= 2, "invalid tag");
+        anyhow::ensure!((1..=2).contains(&val), "invalid tag");
         Ok(match val {
             1 => Tag::I32,
             2 => Tag::Text,

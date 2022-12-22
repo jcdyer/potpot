@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_variables)]
 pub mod bufferpool;
 pub mod storage;
 pub mod aligned;
@@ -13,7 +14,7 @@ mod testutils;
 
 pub(crate) const PAGESIZE: usize = 16384;
 
-pub(crate) type Result<T> = std::result::Result<T, result::Error>;
+const CRC32: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_CKSUM);
 
 #[repr(u16)]
 #[derive(Clone, Copy, Eq, PartialEq)]

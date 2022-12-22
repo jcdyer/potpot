@@ -1,9 +1,8 @@
-//! crate::hashtable
+//! A single page hash table
 //!
-//! A hash table that uses spillover to
 //! Page layouts:
 //!
-//! Single Page Hash Table - Hashes u64 to a fixed-size byte value.
+//! Single Page Hash Table - Hashes a byte key to a fixed-size byte value.
 //!
 //! Emits a CapacityError when trying to insert more elements than we have room for in the page.
 //!
@@ -13,7 +12,7 @@
 //!   0x0008  Hash algorithm (2 bytes)
 //!   0x000a  Padding (6 bytes)
 //!   0x0010  Hash Seed (8 bytes) (maybe depends on hash algorithm?)
-//!   0x0018  Data ((8 byte key + N byte value)* up to (PAGE_SIZE - 0x18) / 8)
+//!   0x0018  Data ((M byte key + N byte value)* up to (PAGE_SIZE - 0x18) / 8)
 //!
 //!   Capacity: (PAGESIZE - 0x18) / (value size + 8) == 16360 / (8 + valuesize)
 //!       So for valuesize=24, capacity == 16360 / 32 == 511
@@ -40,10 +39,6 @@
 //!
 //!
 
-#[test]
-fn capacity() {
-    assert_eq!(0, 16360 / 32)
-}
 use std::{
     hash::{BuildHasher, Hash, Hasher},
     marker::PhantomData,
@@ -148,23 +143,39 @@ impl<'bp, V> SinglePageHashTable<'bp, V> {
         self.buffer_pool
             .read_page(self.page_id, &mut page_buffer)
             .expect("cannot read page");
-        let mut page: page::Page<V> = page::Page::from_aligned(page_buffer)?;
+        let page: page::Page<V> = page::Page::from_aligned(page_buffer)?;
         let mut hasher = self.hash_builder.build_hasher();
         key.hash(&mut hasher);
         let hash = hasher.finish();
-        let slot = hash % self.capacity() as u64;
+        let mut candidate = hash % self.capacity() as u64;
+        let start = candidate;
+        let slot = loop {
+            match self.get_slot(&page, candidate) {
+                Some((k, _)) => if key == k {break candidate;}
+                None => break candidate,
+            }
+            candidate += 1 % self.capacity() as u64;
+            if candidate == start {
+                return Err(anyhow::anyhow!("capacity exceeded"));
+            }
+        };
+        todo!("___WRITE(page, slot, key, value)?;");
 
         // TODO: Need ability to get a slot by ID, check if it's empty, and step through following
         // slots until an empty one is found.  Empty slot bitarray before data slots or interleaved?
         // If before, pre-check next empty slot, then iterate from current to next-empty - 1.  If key
         // not found, insert at next-empty.  Bitarray: 2 bits per slot: 00 - empty, 11 - Full, 01 - Deleted.
         // (bit value xy, x: HasValue, y: ContinueFallthrough)
-
-        Ok(())
     }
 
-    pub fn get(&self, key: u64) -> Option<&V> {
+    // TODO: Allow immutable access.
+    pub fn get(&mut self, key: u64) -> Option<&V> {
         None
+    }
+
+    /// Return the key and value for a given slot, or None if the slot is empty.
+    fn get_slot<'a>(&self, page: &'a page::Page<V>, id: u64) -> Option<(u64, &'a V)> {
+        todo!()
     }
 }
 
@@ -221,24 +232,21 @@ mod page {
     ];
 
     use std::{
-        convert::{TryFrom, TryInto},
         marker::PhantomData,
         mem::size_of,
     };
 
-    use crc::crc32;
 
     use super::HashAlgorithm;
-    use crate::{aligned, PageType, PAGESIZE};
+    use crate::{aligned, PageType, CRC32};
 
     // crc32: u32,
     // page_type: PageType,
     // value_size: u16,
     // hash_algorithm: HashAlgorithm,
-    // padding: [u8; 4],
-    // page_count: usize, // Assume 8-byte usize
+    // padding: [u8; 6],
     // hash_seed: u64,
-    // data: [u8; PAGESIZE - 0x20],
+    // data: [u8; PAGESIZE - 0x18],
     pub(super) struct Page<V> {
         buffer: Box<aligned::Buffer>,
         _value_type: PhantomData<V>,
@@ -283,7 +291,7 @@ mod page {
         }
 
         fn set_crc(&mut self) {
-            let crc = crc32::checksum_ieee(&self.buffer[4..]);
+            let crc = CRC32.checksum(&self.buffer[4..]);
             self.buffer[..4].copy_from_slice(&crc.to_le_bytes())
         }
 
@@ -309,26 +317,17 @@ mod page {
                 _value_type: PhantomData,
             };
             p.set_page_type();
-            p.set_value_size(size_of::<V>().try_into().unwrap());
+            p.set_value_size(size_of::<V>());
             p.set_hash_algorithm(HashAlgorithm::XxHash);
             p.set_hash_seed(hash_seed);
             p
         }
 
-        pub(super) fn into_aligned(self) -> Box<aligned::Buffer> {
-            debug_assert_eq!(size_of::<Self>(), PAGESIZE);
-            debug_assert_eq!(
-                std::mem::align_of::<Self>(),
-                std::mem::align_of::<aligned::Buffer>()
-            );
-
-            // Safety: HeaderPage's size and alignment is the same as PAGESIZE
-            let mut buffer: Box<aligned::Buffer> = unsafe { std::mem::transmute(self) };
-
+        pub(super) fn into_aligned(mut self) -> Box<aligned::Buffer> {
             // Calculate and write the checksum for this page
-            let checksum = crc32::checksum_ieee(&buffer[4..]);
-            buffer[0..4].clone_from_slice(&checksum.to_le_bytes());
-            buffer
+            let checksum = CRC32.checksum(&self.buffer[4..]);
+            self.buffer[0..4].clone_from_slice(&checksum.to_le_bytes());
+            self.buffer
         }
 
         pub(super) fn hash_seed(&self) -> u64 {
@@ -348,10 +347,6 @@ mod page {
 
         }
 
-        fn tmp() {
-            let x: Box<[u8]> = Box::new([1, 2, 3u8]);
-            let x: Box<str> = "abc".into();
-        }
         fn set_hash_algorithm(&mut self, algorithm: HashAlgorithm) {
             self.buffer[8..10].copy_from_slice(&(algorithm as u16).to_le_bytes())
         }
@@ -386,7 +381,8 @@ mod tests {
         let mut pool = BufferPool::new(storage, 3);
 
         let mut ht = SinglePageHashTable::new(&mut pool);
-        ht.insert(97, (4, 12))?;
+        dbg!(ht.insert(97, (4, 12))?);
+        dbg!(ht.get(97));
         assert_eq!(ht.get(97).map(ToOwned::to_owned), Some((4, 12)));
         assert!(ht.get(25).is_none());
         Ok(())
@@ -408,7 +404,7 @@ mod tests {
         {
             let storage = PagedFile::from_path(&path)?;
             let mut pool = BufferPool::new(storage, 3);
-            let ht = SinglePageHashTable::<(usize, usize)>::from_page(&mut pool, page_id)
+            let mut ht = SinglePageHashTable::<(usize, usize)>::from_page(&mut pool, page_id)
                 .expect("No hashtable found at that page ID");
 
             assert_eq!(ht.get(97).map(ToOwned::to_owned), Some((4, 12)));

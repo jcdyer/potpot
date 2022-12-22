@@ -25,11 +25,11 @@ impl RecordManager {
         let &mut(pid, ref mut pg) = &mut self.current_page;
         if pg.free_space() >= record.len() + 4 {
             let rid = pg.insert_record(record).map_err(|_| result::Error::Other)?;
-            let res = bufpool.update_page(pid, pg.data()).map_err(|_| result::Error::Other)?;
+            bufpool.update_page(pid, pg.data()).map_err(|_| result::Error::Other)?;
             Ok((pid, rid))
         } else {
             let mut newpg = page::SlottedPage::default();
-            match newpg.insert_record(&record) {
+            match newpg.insert_record(record) {
                 Ok(rid) => {
                     let pid = bufpool.append_page(newpg.data()).map_err(|_| result::Error::Other)?;
                     self.current_page = (pid, newpg);

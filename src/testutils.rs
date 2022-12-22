@@ -13,7 +13,7 @@ impl TempPath {
 }
 impl Drop for TempPath {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self);
+        let _ = std::fs::remove_file(self);
     }
 }
 
