@@ -8,9 +8,7 @@
 //     can be written in the same operation).
 
 use crate::{PAGESIZE, aligned, storage::PagedFile};
-use std::collections::{
-    HashMap,
-};
+use std::collections::HashMap;
 
 pub trait CacheManager<T> {
     // Mark the entry at the given slot as updated
@@ -112,10 +110,9 @@ impl BufferPool {
             });
 
         if let Some(val) = entry {
-            println!("Got some entry");
+            tracing::trace!("replacing existing entry");
             buf.copy_from_slice(val.as_ref());
         } else {
-            println!("No entry");
             self.storage.read_page(page_id, buf)?;
 
             let frame_idx = self.add_to_buffer_pool(page_id, buf);
@@ -125,8 +122,8 @@ impl BufferPool {
         Ok(())
     }
 
-    // Write a page and get back a page id.
-    pub fn append_page(&mut self, aligned_data: &aligned::Buffer) -> std::io::Result<u64> {
+    /// Write a page and get back a page id.
+    pub fn insert_page(&mut self, aligned_data: &aligned::Buffer) -> std::io::Result<u64> {
         // TBD: Figure out how to manage page_ids of new pages written to the buffer pool
         // without persisting to disk first. Decouple page_ids from disk order?  Track
         // unwritten page_ids?
@@ -135,7 +132,7 @@ impl BufferPool {
         Ok(page_id)
     }
 
-    // Update an existing page
+    /// Update an existing page
     pub fn update_page(&mut self, page_id: u64, data: &aligned::Buffer) -> std::io::Result<()> {
         self.add_to_buffer_pool(page_id, data);
         self.storage.write_page(page_id, data)
@@ -223,7 +220,7 @@ mod tests {
         let aligned = aligned::Buffer::with_value(0xff);
 
         for expected_page in [0, 1, 2, 3, 4].iter() {
-            let page_id = pool.append_page(&aligned)?;
+            let page_id = pool.insert_page(&aligned)?;
             dbg!(page_id);
             assert_eq!(page_id, *expected_page);
 
@@ -282,7 +279,7 @@ mod tests {
             // Pages should get written to disk / evicted from buffer pool.
             .map(|&value| {
                 aligned[..].iter_mut().for_each(|loc| *loc = value);
-                let page_id = pool.append_page(&aligned).unwrap();
+                let page_id = pool.insert_page(&aligned).unwrap();
                 (page_id, value)
             })
             .collect();

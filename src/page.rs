@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::aligned;
-use std::{convert::TryInto, num::TryFromIntError};
+use std::{convert::TryInto, num::TryFromIntError, fmt};
 
 pub(crate) type RecordId = u16;
 
@@ -17,7 +17,7 @@ impl From<TryFromIntError> for TmpError {
 /// SlottedPage represents a page that holds variable-sized tuples.
 /// It comprises a header, followed by free space, followed by data.
 /// The header format looks like:
-///     * u16: End of free space -- where the most recently data starts
+///     * u16: End of free space -- where the most recently written data starts
 ///     * u16: Number of records: [recno]
 ///     * [(u16, u16); recno]: (offset, size) to records.  (u16::MAX, 0) indicates deleted records?
 /// Overall, the file looks like:
@@ -36,6 +36,18 @@ impl Default for SlottedPage {
         let mut pg = SlottedPage { data };
         pg.write_end_of_free_space(crate::PAGESIZE as u16);
         pg
+    }
+}
+
+impl fmt::Debug for SlottedPage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SlottedPage").finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for SlottedPage {
+    fn eq(&self, other: &Self) -> bool {
+        &**self.data == &**other.data
     }
 }
 
@@ -143,6 +155,38 @@ impl SlottedPage {
     }
 }
 
+impl <'a> IntoIterator for &'a SlottedPage {
+    type Item = &'a [u8];
+    type IntoIter = Iter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Iter { page: self, next_record: 0 }
+    }
+}
+
+pub struct Iter<'a> {
+    page: &'a SlottedPage,
+    next_record: u16,
+}
+
+impl <'a> Iterator for Iter<'a> {
+    type Item = &'a [u8];
+    fn next(&mut self) -> Option<&'a [u8]> {
+        let record = self.page.get_record(self.next_record);
+        if record.is_some() {
+            self.next_record += 1;
+        }
+        record
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.page.record_count() as usize;
+        (size, Some(size))
+    }
+}
+
+impl <'a> ExactSizeIterator for Iter<'a> {
+}
 #[cfg(test)]
 mod tests {
     use crate::PAGESIZE;
@@ -197,6 +241,16 @@ mod tests {
         assert_eq!(pg.get_record(14).expect("record 2 not found"), &[15;1024][..], "record 2 not as expected");
         assert_eq!(pg.record_header(15).unwrap(), (8 + i as u16 * 4, available as u16));
         assert_eq!(pg.get_record(15).expect("record 3 not found"), &vec![0xff;available][..], "record 3 not as expected");
+    }
+
+    #[test]
+    fn iter() {
+        let pg = SlottedPage::new(&[&[1;32], &[2;32], &[3;32]]).unwrap();
+        let mut iter = (&pg).into_iter();
+        assert_eq!(iter.next(), Some([1;32].as_slice()));
+        assert_eq!(iter.next(), Some([2;32].as_slice()));
+        assert_eq!(iter.next(), Some([3;32].as_slice()));
+        assert_eq!(iter.next(), None);
     }
 
     #[test]

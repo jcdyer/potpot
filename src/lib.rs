@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_variables)]
 pub mod bufferpool;
 pub mod storage;
 pub mod aligned;
@@ -7,7 +6,8 @@ pub mod types;
 pub mod query;
 pub mod record;
 pub mod result;
-pub mod hashtable;
+pub mod easyhashtable;
+pub mod btree;
 
 #[cfg(test)]
 mod testutils;
@@ -22,17 +22,10 @@ pub(crate) enum PageType {
     MasterRecord = 0x0000,
     DataPage = 0x1000,
     SinglePageHashTable = 0x2000,
-    HashTableFixedWidthSlot = 0x2001,
 }
 
 impl From<u16> for PageType {
     fn from(val: u16) -> PageType {
         unsafe { std::mem::transmute(val) }
     }
-}
-
-
-#[test]
-fn math_check(){
-    assert_eq!(16384, 2i64.pow(14));
 }

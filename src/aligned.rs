@@ -94,8 +94,7 @@ pub(crate) trait FromAligned: Sized {
 
     fn from_aligned(buffer: Box<Buffer>) -> Result<Self, Error> {
         let page_type: crate::PageType = u16::from_le_bytes(buffer[4..6].try_into().unwrap())
-            .try_into()
-            .or(Err(Error::PageType))?;
+            .into();
         if !check_crc(&buffer) {
             Err(Error::CrcError)
         } else if page_type != Self::expected_page_type() {
